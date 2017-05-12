@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Disease Visualization</title>
+    <link rel="stylesheet" href="../bootstrap.min.css">
+    <script type="text/javascript" src="../jquery-3.1.1.min.js"></script>
+    <script type="text/javascript" src="../d3js/d3.v3.js"></script>
+    <script src="../bootstrap.min.js"></script>
+    <style>
+        td {
+            padding: 10px;
+        }
+
+        .link {
+            stroke: #000;
+            stroke-width: 1.5px;
+        }
+    </style>
+</head>
+<body>
+<table>
+    <tr>
+        <td style="text-align: right;">
+            <label for="options">Attributes:</label>
+        </td>
+        <td>
+            <select id="options" class="form-control" onchange="build()">
+                <option value="">None</option>
+                <option value="height">Height</option>
+                <option value="weight">Weight</option>
+                <option value="HR">HR</option>
+            </select>
+        </td>
+        <td style="text-align: right">
+            <label for="features">Features:</label>
+        </td>
+        <td>
+            <select id="features" class="form-control" onchange="feature_selection()">
+                <option value="">None</option>
+                <option value="hover">Hover over bars</option>
+                <option value="mousemove">mouse move left-right</option>
+                <option value="force-layout">Force-Layout</option>
+            </select>
+        </td>
+    </tr>
+</table>
+
+<input type="hidden" name="bins" value="10" id="bins" onchange="build()">
+<input type="hidden" name="flag" value="0" id="flag" onchange="build()">
+<script>
+    var minbins = 1;
+    var maxbins = 20;
+    var padding = 50;
+    var bar_width;
+    var bars;
+    var bins;
+    var margin = {top: 20, right: 10, bottom: 20, left: 10};
+    var svgWidth = 1200 - margin.left - margin.right,
+        svgHeight = 500 - margin.top - margin.bottom;
+    var selected_feature;
+    var csv_data;
+
+    d3.select("body")
+        .append("svg")
+        .attr("id", "mainsvg")
+        .attr("width", svgWidth)
+        .attr("height", svgHeight + padding)
+        .attr("display", "block")
+        .attr("margin", "auto")
+        .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+
+    d3.csv("../baseball_data.csv", function (data) {
+        var myArray = [[]];
+        csv_data = data;
+        build();
+    });
+
+    function addMouseMove() {
+        var scale = d3.scale.linear()
+            .domain([0, svgWidth])
+            .range([minbins, maxbins]);
+        document.getElementById("bins").value = scale(event.clientX);
+        build();
+    }
+
+    function addMouseClick() {
+        var curr = document.getElementById("flag").value;
+        if (curr == "0") {
+            document.getElementById("flag").value = 1;
+            build();
+        } else {
+            document.getElementById("flag").value = 0;
+            build();
+        }
+    }
+    function feature_selection() {
+        var curr = document.getElementById("features").value;
+        var attr = document.getElementById("options").value;
+        if (attr == "") {
+            return;
+        }
+        if (curr == "") {
+            return;
+        }
+        $("#mainsvg").unbind('mousemove');
+        $("#mainsvg").unbind("click");
+        if (curr == "hover") {
+            selected_feature = "hover";
+            $("#mainsvg").bind("click", addMouseClick);
+            build();
+        } else if (curr == "mousemove") {
+            selected_feature = "mousemove";
+            $("#mainsvg").bind("mousemove", addMouseMove);
+            $("#mainsvg").bind("click", addMouseClick);
+            build();
+        } else if (curr == "force-layout") {
+            selected_feature = "force-layout";
+            $("#mainsvg").empty();
+            buildForceLayout();
+        }
+    }
+
+    function buildForceLayout() {
+        d3.json("graph.json", function (error, graph) {
+            if (error) throw error;
+            var svg = d3.select("svg");
+
+            var force = d3.layout.force()
+                .size([svgWidth, svgHeight])
+                .nodes(d3.values(graph.nodes))
+                .links(graph.links)
+                .on("tick", tick)
+                .linkDistance(200)
+                .start();
+
+            var link = svg.selectAll('.link')
+                .data(graph.links)
+                .enter()
+                .append('line')
+                .attr('class', 'link');
+
+            var node = svg.selectAll('.node')
+                .data(force.nodes())
+                .enter()
+                .append('circle')
+                .attr('class', 'node')
+                .attr('r', 10);
+
+            function tick(e) {
+                node.attr('cx', function (d) {
+                    return d.x;
+                })
+                    .attr('cy', function (d) {
+                        return d.y;
+                    })
+                    .call(force.drag);
+                link.attr('x1', function (d) {
+                    return d.source.x;
+                })
+                    .attr('y1', function (d) {
+                        return d.source.y;
+                    })
+                    .attr('x2', function (d) {
+                        return d.target.x;
+                    })
+                    .attr('y2', function (d) {
+                        return d.target.y;
+                    });
+            }
+        })
+    }
+
+    function build() {
+        $("#mainsvg").empty();
+        if (document.getElementById("flag").value == "0") {
+            buildHist();
+        } else {
+            buildPie();
+        }
+    }
+
+    function buildPie() {
+        var ele = document.getElementById("options").value;
+        if (ele == "") {
+            return;
+        }
+
+        var map = csv_data.map(function (i) {
+            return parseInt(i[ele]);
+        });
+
+        var histogram = d3.layout.histogram()
+            .bins(parseInt(document.getElementById("bins").value))
+            (map);
+
+        var margin = {top: 20, right: 20, bottom: 20, left: 20},
+            width = svgWidth - margin.right - margin.left,
+            height = svgHeight - margin.top - margin.bottom,
+            radius = svgHeight / 2;
+
+        var pie = d3.layout.pie()
+            .sort(null)
+            .value(function (d) {
+                return d.y;
+            });
+        var instances = pie(histogram);
+        var container = d3.select("svg")
+            .append("g")
+            .attr("transform", "translate(" + svgWidth / 2 + "," + svgHeight / 2 + ")");
+        var g = container.selectAll("g")
+            .data(instances)
+            .enter()
+            .append("g");
+
+        var arc = d3.svg.arc()
+            .outerRadius(radius - 10)
+            .innerRadius(0);
+
+        var labelArc = d3.svg.arc()
+            .outerRadius(radius - 30)
+            .innerRadius(radius - 40);
+
+        var color = d3.scale.category20();
+        g.append("path")
+            .attr("d", arc)
+            .style("fill", function (d, i) {
+                return color(d.value);
+            });
+        g.append("text")
+            .attr("transform", function (d) {
+                return "translate(" + labelArc.centroid(d) + ")";
+            })
+
+            .text(function (d) {
+                return d.data.length;
+            })
+            .attr("fill", "black");
+    }
+
+    function buildHist() {
+        var ele = document.getElementById("options").value;
+        if (ele == "") {
+            return;
+        }
+        var padding = 20;
+        bins = +document.getElementById("bins").value;
+        bar_width = (svgWidth - ((bins - 1) * padding)) / (bins);
+        var map = csv_data.map(function (i) {
+            return parseInt(i[ele]);
+        });
+
+        var histogram = d3.layout.histogram()
+            .bins(parseInt(document.getElementById("bins").value))
+            (map);
+
+        var y = d3.scale.linear()
+            .domain([0, d3.max(histogram.map(function (i) {
+                return i.length;
+            }))])
+            .range([0, svgHeight - padding]);
+        var xAxis = d3.svg.axis()
+            .orient("bottom");
+        bars = d3.select("svg").selectAll(".bar")
+            .data(histogram)
+            .enter()
+            .append("g");
+        var group = d3.select("svg").append("g")
+            .attr("transform", "translate(0," + svgHeight + ")")
+            .call(xAxis);
+
+        bars.append("rect")
+            .attr("x", function (d, i) {
+                return (i * (bar_width + padding));
+            })
+            .attr("y", function (d) {
+                return (svgHeight - y(d.y));
+            })
+            .attr("width", function (d) {
+                return bar_width;
+            })
+            .attr("height", function (d) {
+                return y(d.y);
+            })
+            .attr("fill", "steelblue");
+        bars
+            .append("text")
+            .attr("x", function (d, i) {
+                return (i * (bar_width + padding));
+            })
+            .attr("y", function (d) {
+                return svgHeight - y(d.y) + 5;
+            })
+            .attr("dy", "-1px")
+            .attr("dx", bar_width / 2)
+            .attr("fill", "black")
+            .attr("text-anchor", "middle")
+            .text(function (d) {
+                return d.y;
+            })
+            .style("visibility", "hidden");
+
+        if (selected_feature == "hover") {
+            bars
+                .on('mouseover', function (d, i) {
+                    d3.select(this).select("text").style("visibility", "visible");
+                    var xPos = +d3.select(this).select("rect").attr("x");
+                    var wid = +d3.select(this).select("rect").attr("width");
+                    var yPos = +d3.select(this).select("rect").attr("y");
+                    var height = +d3.select(this).select("rect").attr("height");
+                    d3.select(this).select("rect").attr("x", xPos - 10).attr("width", wid + 20);
+                    d3.select(this).select("rect").attr("y", yPos - 10).attr("height", height + 20);
+                })
+                .on('mouseout', function (d, i) {
+                    d3.select(this).select("text").style("visibility", "hidden");
+                    var xPos = +d3.select(this).select("rect").attr("x");
+                    var wid = +d3.select(this).select("rect").attr("width");
+                    var yPos = +d3.select(this).select("rect").attr("y");
+                    var height = +d3.select(this).select("rect").attr("height");
+                    d3.select(this).select("rect").attr("x", xPos + 10).attr("width", wid - 20);
+                    d3.select(this).select("rect").attr("y", yPos + 10).attr("height", height - 20);
+                })
+        }
+        console.log(histogram);
+        var min  = d3.min(histogram.map(function (i) {
+            return i.x;
+        }));
+        var max  = d3.max(histogram.map(function (i) {
+            return i.x;
+        }));
+
+        var axisScale = d3.scale.linear()
+            .domain([0,bins])
+            .range([0,bins*(bar_width+padding)]);
+
+
+        var axis = d3.svg.axis()
+            .ticks(bins)
+            .scale(axisScale);
+
+        d3.select('svg').select('g')
+            .append('g')
+            .attr("transform","translate(0,"+svgHeight+")")
+            .call(axis);
+    }
+</script>
+</body>
+</html>
